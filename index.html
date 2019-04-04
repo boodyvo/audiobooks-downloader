@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset = "UTF-8">
+    <title>Menus</title>
+</head>
+
+<body>
+<div>
+    <webview id = "web"
+             style = "width:100vw; height:100vh;">
+    </webview>
+</div>
+
+<script type = "text/javascript">
+    onload = () => {
+        const webview = document.getElementById("web");
+        webview.src = `https://audioknigi.club/${window.book}`;
+        let requestId;
+        let a = document.createElement("a");
+        document.body.appendChild(a);
+        a.style = "display: none";
+        let myURL = window.URL || window.webkitURL;
+
+        function makeRequest(current, files) {
+            console.log(current, files[current]);
+            if (current == files.length) {
+                window.ipcRenderer.send('got-last');
+                return;
+            }
+            let oReq = new XMLHttpRequest();
+            oReq.onload = async () => {
+                let blob = new Blob([oReq.response], {
+                    type: 'audio/mpeg'
+                });
+                let objectUrl = myURL.createObjectURL(blob);
+                window.ipcRenderer.send('set-url-title', {
+                    title: files[current].title,
+                    url: objectUrl,
+                });
+                a.href = objectUrl;
+                a.download = name;
+                a.click();
+                makeRequest(current + 1, files);
+            };
+            oReq.onerror = async () => {
+                makeRequest(current, files);
+            };
+            oReq.responseType = "blob";
+            oReq.open("GET", files[current].mp3);
+            oReq.send();
+        }
+
+        const attachDebugger = () => {
+
+            const debug = webview.getWebContents().debugger;
+            debug.attach('1.1');
+
+            debug.on('message', (event, method, params) => {
+                if (method === 'Network.responseReceived') {
+//                if (method === 'Network.loadingFinished') {
+                    if (params.requestId == requestId) {
+                        console.log("Got files");
+                        console.log(params);
+                        console.log(requestId);
+
+                        debug.sendCommand('Network.getResponseBody', {
+                            requestId: requestId
+                        }, async (err, data, some) => {
+                            console.log(data);
+                            console.log(some);
+                            console.log(err);
+                            let files = JSON.parse(JSON.parse(data.body).aItems);
+                            makeRequest(0, files);
+                        });
+                    }
+                }
+                if (method === 'Network.requestWillBeSent') {
+                    if (params.request.url.indexOf("https://audioknigi.club/ajax/bid") !== -1) {
+                        requestId = params.requestId;
+                    }
+                }
+            });
+            debug.sendCommand('Network.enable');
+            webview.removeEventListener('did-start-loading', attachDebugger);
+        };
+        webview.addEventListener('did-start-loading', attachDebugger);
+    }
+</script>
+</body>
+</html>
